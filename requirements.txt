@@ -1,0 +1,17 @@
+# API Framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# Kafka
+kafka-python==2.0.2
+confluent-kafka==2.3.0
+
+# Data generation
+faker==20.1.0
+numpy==1.26.2
+
+# Utilities
+python-dotenv==1.0.0
+structlog==23.2.0

@@ -1,0 +1,11 @@
+kafka:
+  bootstrap_servers: "localhost:19092"
+  topics:
+    user_events: "user-events"
+    content_events: "content-events"
+
+generator:
+  num_users: 1000
+  num_posts: 5000
+  events_per_second: 100
+  user_event_ratio: 0.9 # 90% user events, 10% content events
