@@ -1,6 +1,7 @@
 import structlog
 from confluent_kafka import Consumer, KafkaError
 from src.storage.redis_client import RedisClient
+from src.storage.postgres_client import PostgresClient
 from src.streaming.user_engagement_processor import UserEngagementProcessor
 
 logger = structlog.get_logger()
@@ -22,11 +23,12 @@ class StreamConsumer:
         self.consumer = Consumer(conf)
         self.consumer.subscribe(topics)
         
-        # Initialize Redis and processors
+        # Initialize Redis and PostgreSQL
         self.redis = RedisClient()
-        self.user_processor = UserEngagementProcessor(self.redis)
+        self.postgres = PostgresClient()
+        self.user_processor = UserEngagementProcessor(self.redis, self.postgres)
         
-        logger.info("Stream consumer initialized",
+        logger.info("Stream consumer initialized with dual storage",
                    bootstrap_servers=bootstrap_servers,
                    group_id=group_id,
                    topics=topics)
@@ -58,6 +60,7 @@ class StreamConsumer:
                 if topic == 'user-events':
                     self.user_processor.process_event(value)
                 elif topic == 'content-events':
+                    # We'll add content processor later
                     pass
                 
                 message_count += 1
@@ -69,7 +72,6 @@ class StreamConsumer:
             logger.info("Shutting down stream consumer")
         finally:
             self.consumer.close()
-            self.redis.close()
             logger.info("Stream consumer closed")
 
 
