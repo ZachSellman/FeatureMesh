@@ -6,6 +6,7 @@ from typing import Dict
 from src.common.events import EventType
 from src.common.features import USER_FEATURES
 from src.storage.redis_client import RedisClient
+from src.storage.postgres_client import PostgresClient
 
 logger = structlog.get_logger()
 
@@ -13,17 +14,14 @@ logger = structlog.get_logger()
 class UserEngagementProcessor:
     """
     Processes user events and computes real-time engagement features
+    Writes to BOTH Redis (online) and PostgreSQL (offline)
     """
     
-    def __init__(self, redis_client: RedisClient):
+    def __init__(self, redis_client: RedisClient, postgres_client: PostgresClient):
         self.redis = redis_client
+        self.postgres = postgres_client
         
-        # In-memory state for windowed aggregations
-        # In production, Flink would manage this state
-        self.user_clicks_1h = defaultdict(int)
-        self.user_views_1h = defaultdict(int)
-        
-        logger.info("UserEngagementProcessor initialized")
+        logger.info("UserEngagementProcessor initialized with dual storage")
     
     def process_event(self, event_json: str):
         """Process a single user event"""
@@ -52,24 +50,45 @@ class UserEngagementProcessor:
     def _process_click(self, user_id: str):
         """Process a click event"""
         feature_def = USER_FEATURES["user_clicks_1h"]
-        self.redis.increment_counter(feature_def, user_id)
-        logger.debug("Processed click", user_id=user_id)
+        
+        # Write to Redis (online)
+        new_value = self.redis.increment_counter(feature_def, user_id)
+        
+        # Write to PostgreSQL (offline)
+        self.postgres.store_offline_feature(
+            entity_id=user_id,
+            entity_type="user",
+            feature_name=feature_def.name,
+            feature_value=str(new_value)
+        )
+        
+        logger.debug("Processed click", user_id=user_id, value=new_value)
     
     def _process_view(self, user_id: str):
         """Process a view event"""
         feature_def = USER_FEATURES["user_views_1h"]
-        self.redis.increment_counter(feature_def, user_id)
-        logger.debug("Processed view", user_id=user_id)
+        
+        # Write to Redis (online)
+        new_value = self.redis.increment_counter(feature_def, user_id)
+        
+        # Write to PostgreSQL (offline)
+        self.postgres.store_offline_feature(
+            entity_id=user_id,
+            entity_type="user",
+            feature_name=feature_def.name,
+            feature_value=str(new_value)
+        )
+        
+        logger.debug("Processed view", user_id=user_id, value=new_value)
     
     def _process_vote(self, user_id: str, vote_type: str):
         """Process an upvote/downvote event"""
-        # For now, just count as engagement
         pass
     
     def _compute_engagement_score(self, user_id: str):
         """
         Compute weighted engagement score
-        Formula: (views * 1) + (clicks * 3) + (votes * 5)
+        Formula: (views * 1) + (clicks * 3)
         """
         # Get current counts from Redis
         clicks = self.redis.get_feature(USER_FEATURES["user_clicks_1h"], user_id) or 0
@@ -82,9 +101,18 @@ class UserEngagementProcessor:
         # Calculate weighted score
         engagement_score = (views * 1) + (clicks * 3)
         
-        # Store in Redis
         feature_def = USER_FEATURES["user_engagement_score"]
+        
+        # Store in Redis (online)
         self.redis.set_feature(feature_def, user_id, engagement_score)
+        
+        # Store in PostgreSQL (offline)
+        self.postgres.store_offline_feature(
+            entity_id=user_id,
+            entity_type="user",
+            feature_name=feature_def.name,
+            feature_value=str(engagement_score)
+        )
         
         logger.debug("Computed engagement score",
                     user_id=user_id,
